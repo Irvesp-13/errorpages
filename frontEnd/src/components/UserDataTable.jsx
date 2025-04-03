@@ -7,57 +7,72 @@ const UserDataTable = () => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentUserEmail, setCurrentUserEmail] = useState(null);
+  const [editingUser, setEditingUser] = useState(null);
 
   useEffect(() => {
-    // Get current user email from JWT token
     const token = localStorage.getItem('accessToken');
     if (token) {
       const tokenData = JSON.parse(atob(token.split('.')[1]));
       setCurrentUserEmail(tokenData.email);
     }
-
     fetchUsers();
   }, []);
 
-  const fetchUsers = () => {
-    const token = localStorage.getItem('accessToken');
-    axios
-      .get("http://127.0.0.1:8000/users/api/", {
+  const fetchUsers = async () => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      const response = await axios.get("http://127.0.0.1:8000/users/api/", {
         headers: {
           'Authorization': `Bearer ${token}`
         }
-      })
-      .then((response) => {
-        setData(response.data);
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error("Error cargando los datos:", error);
-        setLoading(false);
       });
+      setData(response.data);
+      setLoading(false);
+    } catch (error) {
+      if (error.response?.status === 401) {
+        await refreshToken();
+        fetchUsers();
+      } else {
+        console.error("Error cargando usuaruis:", error);
+        setLoading(false);
+      }
+    }
+  };
+
+  const refreshToken = async () => {
+    try {
+      const refreshToken = localStorage.getItem('refreshToken');
+      const response = await axios.post('http://127.0.0.1:8000/users/token/refresh/', {
+        refresh: refreshToken
+      });
+      localStorage.setItem('accessToken', response.data.access);
+      return response.data.access;
+    } catch (error) {
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      window.location.href = '/login';
+    }
   };
 
   const handleDelete = async (id, email) => {
-    // Prevent self-deletion
     if (email === currentUserEmail) {
       Swal.fire({
         icon: 'error',
-        title: 'Operacoin Invalida',
-        text: 'No puedes eliminar tu propia cuenta.'
+        title: 'Operacion no permitida',
+        text: 'No puedes borrar tu propia cuenta!'
       });
       return;
     }
 
-    // Show confirmation dialog
     const result = await Swal.fire({
-      title: 'Estas segura?',
-      text: "Esta acion no se puede deshacer.",
+      title: 'Estas seguro?',
+      text: "No puedes revertir esta accion!",
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#d33',
       cancelButtonColor: '#3085d6',
-      confirmButtonText: 'Yes, eliminar...',
-      cancelButtonText: 'Cancelar.'
+      confirmButtonText: 'Borrar!',
+      cancelButtonText: 'Cancelar'
     });
 
     if (result.isConfirmed) {
@@ -69,29 +84,93 @@ const UserDataTable = () => {
           }
         });
 
-        // Show success message
         await Swal.fire({
           icon: 'success',
-          title: 'Eliminado!',
-          text: 'El usuario ha sido eliminado con exito.'
+          title: 'Borrado!',
+          text: 'El usuario se borro de forma exitosa.'
         });
 
-        // Refresh user list
         fetchUsers();
       } catch (error) {
-        Swal.fire({
-          icon: 'error',
-          title: 'Error',
-          text: 'Error al eliminar el usuario.'
-        });
-        console.error("Error al eliminar:", error);
+        if (error.response?.status === 401) {
+          await refreshToken();
+          handleDelete(id, email);
+        } else {
+          Swal.fire({
+            icon: 'error',
+            title: 'Error',
+            text: 'El usuario no pudo ser borrado.'
+          });
+        }
+      }
+    }
+  };
+
+  const handleEdit = async (user) => {
+    const { value: formValues } = await Swal.fire({
+      title: 'Edit User',
+      html:
+        `<input id="name" class="swal2-input" placeholder="Name" value="${user.name || ''}" >` +
+        `<input id="email" class="swal2-input" placeholder="Email" value="${user.email || ''}" >` +
+        `<input id="tel" class="swal2-input" placeholder="Telefono" value="${user.tel || ''}" >` +
+        `<input id="age" class="swal2-input" type="number" placeholder="Edad" value="${user.age || ''}" >`,
+      focusConfirm: false,
+      showCancelButton: true,
+      confirmButtonText: 'Actualizar',
+      preConfirm: () => {
+        return {
+          name: document.getElementById('name').value,
+          email: document.getElementById('email').value,
+          tel: document.getElementById('tel').value,
+          age: document.getElementById('age').value
+        }
+      }
+    });
+
+    if (formValues) {
+      const confirmResult = await Swal.fire({
+        title: 'Estas seguro?',
+        text: "Quieres actualizar este usuario?",
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Actualizar'
+      });
+
+      if (confirmResult.isConfirmed) {
+        try {
+          const token = localStorage.getItem('accessToken');
+          await axios.put(`http://127.0.0.1:8000/users/api/${user.id}/`, formValues, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+
+          await Swal.fire({
+            icon: 'success',
+            title: 'Actualizado!',
+            text: 'El usuario ha sido actualizado correctamente.'
+          });
+
+          fetchUsers();
+        } catch (error) {
+          if (error.response?.status === 401) {
+            await refreshToken();
+            handleEdit(user);
+          } else {
+            Swal.fire({
+              icon: 'error',
+              title: 'Error',
+              text: 'Error al actualizar el usuario.'
+            });
+          }
+        }
       }
     }
   };
 
   const columns = [
     {
-      name: "Nombre",
+      name: "Name",
       selector: (row) => row.name,
       sortable: true,
     },
@@ -101,33 +180,38 @@ const UserDataTable = () => {
       sortable: true,
     },
     {
-      name: "Teléfono",
+      name: "Phone",
       selector: (row) => row.tel,
     },
     {
-      name: "Acciones",
+      name: "Age",
+      selector: (row) => row.age,
+    },
+    {
+      name: "Actions",
       cell: (row) => (
-        <span>
+        <div className="btn-group">
           <button
-            className="btn btn-warning me-4"
-            onClick={() => alert(`Editando ${row.name}`)}
+            className="btn btn-warning btn-sm"
+            onClick={() => handleEdit(row)}
           >
             <i className="bi bi-pencil"></i>
           </button>
           <button
-            className="btn btn-danger me-4"
+            className="btn btn-danger btn-sm ms-2"
             onClick={() => handleDelete(row.id, row.email)}
+            disabled={row.email === currentUserEmail}
           >
             <i className="bi bi-trash"></i>
           </button>
-        </span>
+        </div>
       ),
     },
   ];
 
   return (
-    <div>
-      <h3>Tabla de usuarios</h3>
+    <div className="container mt-4">
+      <h3>User Management</h3>
       <DataTable
         columns={columns}
         data={data}

@@ -1,6 +1,8 @@
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.decorators import action
+from rest_framework.response import Response
 #Falta importar el modelo
 from .models import CustomUser
 #Falta importar el serializador
@@ -11,17 +13,17 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = CustomUser.objects.all()
     serializer_class = CustomUserSerializer
     renderer_classes = [JSONRenderer]
-
-    #Como le pongo seguridad?
     authentication_classes = [JWTAuthentication]
     permission_classes=[IsAuthenticated]
 
-    #Sobreescribir el metodo para la obtención de permisos
+    @action(detail=False, methods=['GET'])
+    def me(self, request):
+        serializer = self.get_serializer(request.user)
+        return Response(serializer.data)
+
     def get_permissions(self):
         if self.request.method in ['POST','PUT', 'DELETE']:
-            # Checar si tenemos sesión 
             return [IsAuthenticated()]
-        #Dar acceso a todo lo demas sin estar logueado
         return []
 
 from rest_framework_simplejwt.views import TokenObtainPairView
